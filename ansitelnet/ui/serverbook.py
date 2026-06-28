@@ -59,6 +59,12 @@ def _main(stdscr) -> Server | None:
         curses.curs_set(0 if focus == 'list' else 1)
         key = stdscr.getch()
 
+        # ── Einstellungen (F3) ────────────────────────────────────────────
+        if key == curses.KEY_F3:
+            from .settings import open_settings
+            open_settings(stdscr)
+            continue
+
         # ── Tab wechseln ───────────────────────────────────────────────────
         if key == curses.KEY_F4:
             view   = 'dir' if view == 'book' else 'book'
@@ -189,7 +195,7 @@ def _draw(stdscr, H: int, W: int, servers: list[Server],
         # ── Kopfzeile mit Tab-Auswahl ──────────────────────────────────────
         tab_book = ' Serverbook '
         tab_dir  = ' Verzeichnis '
-        tab_hint = '[F4]=Wechseln  [F5]=Aktualisieren  [Esc]=Ende '
+        tab_hint = '[F3]=Einstellungen  [F4]=Wechseln  [F5]=Aktualisieren  [Esc]=Ende '
 
         stdscr.attron(C.p(C.TITLE) | curses.A_BOLD)
         stdscr.addstr(0, 0, ' ansitelnet '.ljust(W)[: W])
@@ -393,25 +399,29 @@ def _edit_dialog(stdscr, srv: Server | None) -> Server | None:
     from . import colors as C
 
     fields = {
-        'name':  srv.name       if srv else '',
-        'host':  srv.host       if srv else '',
-        'port':  str(srv.port)  if srv else '23',
-        'color': str(srv.color) if srv else '16',
-        'mode':  srv.mode       if srv else 'telnet',
+        'name':         srv.name            if srv else '',
+        'host':         srv.host            if srv else '',
+        'port':         str(srv.port)       if srv else '23',
+        'color':        str(srv.color)      if srv else '16',
+        'mode':         srv.mode            if srv else '',
+        'download_dir': srv.download_dir    if srv else '',
+        'upload_dir':   srv.upload_dir      if srv else '',
     }
-    order  = ['name', 'host', 'port', 'color', 'mode']
+    order  = ['name', 'host', 'port', 'color', 'mode', 'download_dir', 'upload_dir']
     labels = {
-        'name':  'Name:       ',
-        'host':  'Host:       ',
-        'port':  'Port:       ',
-        'color': 'Farben:     ',
-        'mode':  'Modus:      ',
+        'name':         'Name:           ',
+        'host':         'Host:           ',
+        'port':         'Port:           ',
+        'color':        'Farben:         ',
+        'mode':         'Modus:          ',
+        'download_dir': 'Download-Ordner:',
+        'upload_dir':   'Upload-Ordner:  ',
     }
     focus = 0
 
     while True:
         H, W = stdscr.getmaxyx()
-        dh, dw = 14, min(60, W - 4)
+        dh, dw = 20, min(66, W - 4)
         dy = max(0, (H - dh) // 2)
         dx = max(0, (W - dw) // 2)
 
@@ -427,7 +437,7 @@ def _edit_dialog(stdscr, srv: Server | None) -> Server | None:
             win.addstr(0, max(1, (dw - len(t)) // 2), t[: dw - 2])
             win.attroff(C.p(C.TITLE) | curses.A_BOLD)
 
-            fw = dw - len(labels['name']) - 6
+            fw = dw - len(labels['download_dir']) - 6
             for i, fname in enumerate(order):
                 row  = 2 + i * 2
                 lbl  = labels[fname]
@@ -438,6 +448,11 @@ def _edit_dialog(stdscr, srv: Server | None) -> Server | None:
                 win.attron(attr)
                 win.addstr(row, 2 + len(lbl), (val + ' ').ljust(fw)[: fw])
                 win.attroff(attr)
+
+            note = '(Ordner leer = globale Einstellung)'
+            win.attron(C.p(C.DIM))
+            win.addstr(dh - 4, 2, note[: dw - 4])
+            win.attroff(C.p(C.DIM))
 
             hints = '[Tab]=Weiter  [Enter]=OK  [Esc]=Abbr.'
             win.attron(C.p(C.KEY))
@@ -470,11 +485,13 @@ def _edit_dialog(stdscr, srv: Server | None) -> Server | None:
             else:
                 try:
                     return Server(
-                        name  = fields['name'].strip() or fields['host'].strip(),
-                        host  = fields['host'].strip(),
-                        port  = int(fields['port']) if fields['port'].isdigit() else 23,
-                        color = int(fields['color']) if fields['color'].isdigit() else 16,
-                        mode  = fields['mode'].strip() or 'telnet',
+                        name         = fields['name'].strip() or fields['host'].strip(),
+                        host         = fields['host'].strip(),
+                        port         = int(fields['port']) if fields['port'].isdigit() else 23,
+                        color        = int(fields['color']) if fields['color'].isdigit() else 16,
+                        mode         = fields['mode'].strip(),
+                        download_dir = fields['download_dir'].strip(),
+                        upload_dir   = fields['upload_dir'].strip(),
                     )
                 except ValueError:
                     pass

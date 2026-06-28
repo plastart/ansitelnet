@@ -25,13 +25,16 @@ def main() -> None:
     parser.add_argument('-w', '--width', dest='width', type=int, default=0,
                         metavar='N',
                         help='Anzeigebreite auf N Zeichen begrenzen und zentrieren (z.B. 80)')
+    parser.add_argument('-r', '--record', dest='record', action='store_true',
+                        default=False,
+                        help='Session von Anfang an als asciinema-Cast aufzeichnen')
     args = parser.parse_args()
 
     if args.host:
         # Direktverbindung ohne UI
         from .proxy import run_proxy
         run_proxy(args.host, args.port, color_mode=args.color, mode=args.mode,
-                  cap_width=args.width)
+                  cap_width=args.width, record=args.record)
     else:
         # Serverbook-UI
         from .ui.serverbook import run_serverbook
@@ -39,8 +42,12 @@ def main() -> None:
         if server:
             from .proxy import run_proxy
             run_proxy(server.host, server.port,
-                      color_mode=server.color, mode=server.mode,
-                      cap_width=args.width)
+                      color_mode=server.color,
+                      mode=server.mode or 'telnet',
+                      cap_width=args.width,
+                      record=args.record,
+                      download_dir=server.download_dir,
+                      upload_dir=server.upload_dir)
 
 
 if __name__ == '__main__':

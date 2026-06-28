@@ -104,7 +104,8 @@ def _draw(win: 'curses._CursesWindow', title: str, state: dict, is_dl: bool) -> 
 
 
 def _transfer(stdscr, sock: socket.socket, cmd: list[str],
-              is_dl: bool, re_file, re_prog, leftover: bytes) -> int:
+              is_dl: bool, re_file, re_prog, leftover: bytes,
+              cwd: str | None = None) -> int:
     from . import colors as C
     C.init()
     curses.curs_set(0)
@@ -132,6 +133,7 @@ def _transfer(stdscr, sock: socket.socket, cmd: list[str],
         stdin=r_in,
         stdout=sock.fileno(),
         stderr=w_err,
+        cwd=cwd,
     )
     os.close(r_in)
     os.close(w_err)
@@ -221,7 +223,8 @@ def _transfer(stdscr, sock: socket.socket, cmd: list[str],
     return proc.wait()
 
 
-def show_download(sock: socket.socket, leftover: bytes = b'') -> int:
+def show_download(sock: socket.socket, leftover: bytes = b'',
+                  cwd: str | None = None) -> int:
     """rz starten und Fortschritts-Dialog zeigen.
     Telnet-Binärmodus wird bereits beim Verbindungsaufbau ausgehandelt."""
     def _w(stdscr):
@@ -232,6 +235,7 @@ def show_download(sock: socket.socket, leftover: bytes = b'') -> int:
             re_file=RE_RZ_FILE,
             re_prog=RE_RZ_PROG,
             leftover=leftover,
+            cwd=cwd,
         )
 
     return curses.wrapper(_w)
