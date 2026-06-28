@@ -224,3 +224,7 @@ Settings are stored in `~/.config/ansitelnet/`:
 ## Licence
 
 MIT — see [LICENCE](LICENCE) for details.
+
+---
+
+Made with heart and a some help of Claude Sonnet 4.6
