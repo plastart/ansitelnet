@@ -19,7 +19,7 @@ from typing import Callable
 
 from .config import CONFIG_DIR, Server
 
-_GUIDE_BASE = 'https://www.telnetbbsguide.com/bbslist/'
+_GUIDE_BASE = 'http://www.telnetbbsguide.com/bbslist/'
 # Projektverzeichnis (bei Entwicklung: telnetbbsguide.com/ liegt direkt neben ansitelnet/)
 _PROJ_GUIDE_DIR = Path(__file__).parent.parent / 'telnetbbsguide.com'
 
@@ -91,7 +91,7 @@ def fetch(on_status: Callable[[str], None] | None = None) -> list[Server]:
 def _download(url: str) -> bytes:
     req = urllib.request.Request(
         url,
-        headers={'User-Agent': 'ansitelnet/1.0 (+https://github.com/ansitelnet)'},
+        headers={'User-Agent': 'ansitelnet/1.0 (+http://github.com/plastart/ansitelnet)'},
     )
     with urllib.request.urlopen(req, timeout=20) as r:
         return r.read()

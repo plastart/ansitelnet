@@ -7,6 +7,7 @@ _excludes = [
     'unittest', 'doctest', 'pdb', 'pydoc',
     'email', 'mailbox', 'imaplib', 'smtplib', 'poplib', 'ftplib', 'nntplib',
     'sqlite3', '_sqlite3',
+    'ssl', '_ssl', '_hashlib',
     'http.server', 'xmlrpc',
     'distutils', 'lib2to3',
     'multiprocessing',
