@@ -1,6 +1,20 @@
 # -*- mode: python ; coding: utf-8 -*-
 import sys
 
+_excludes = [
+    'tkinter', '_tkinter',
+    'asyncio',
+    'unittest', 'doctest', 'pdb', 'pydoc',
+    'email', 'mailbox', 'imaplib', 'smtplib', 'poplib', 'ftplib', 'nntplib',
+    'sqlite3', '_sqlite3',
+    'http.server', 'xmlrpc',
+    'distutils', 'lib2to3',
+    'multiprocessing',
+    'curses.textpad',
+    'test', 'tests',
+    'pip', 'setuptools', 'pkg_resources',
+]
+
 a = Analysis(
     ['main.py'],
     pathex=[],
@@ -10,9 +24,9 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=_excludes,
     noarchive=False,
-    optimize=1,
+    optimize=2,
 )
 pyz = PYZ(a.pure)
 

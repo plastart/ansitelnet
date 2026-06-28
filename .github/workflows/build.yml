@@ -28,6 +28,14 @@ jobs:
         with:
           python-version: '3.x'
 
+      - name: Install UPX (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y upx-ucl
+
+      - name: Install UPX (Windows)
+        if: runner.os == 'Windows'
+        run: choco install upx --no-progress -y
+
       - name: Install dependencies
         run: pip install pyinstaller ${{ matrix.extra_deps }}
 
