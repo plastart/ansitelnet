@@ -323,11 +323,15 @@ def run_proxy(host: str, port: int,
         _draw_status(stdout_fd, host, port, color_mode, mode, H, W, is_recording=True)
 
     def _write_term(data: bytes) -> None:
-        """BBS-Daten → Terminal; nach \033[2J die Randlinien neu zeichnen."""
+        """BBS-Daten → Terminal; nach \033[2J Rand und Statusbar neu zeichnen."""
         out = to_utf8(data)
-        if left_bdr > 0 and b'\033[2J' in out:
+        clrscr = b'\033[2J' in out or b'\033[3J' in out
+        if left_bdr > 0 and clrscr:
             out += _border_seq(H, left_bdr, right_bdr)
         os.write(stdout_fd, out)
+        if clrscr:
+            _draw_status(stdout_fd, host, port, color_mode, mode, H, W,
+                         is_recording=_cast[0] is not None)
         if _cast[0] is not None:
             _cast[0].write(out)
 

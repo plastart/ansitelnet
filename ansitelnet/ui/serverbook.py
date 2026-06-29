@@ -2,18 +2,30 @@
 Serverbook Hauptscreen (curses).
 Tab 1 "Serverbook":  persönliche gespeicherte Server.
 Tab 2 "Verzeichnis": Online-BBS-Liste von telnetbbsguide.com (F5=Aktualisieren).
+
+Rechtes Panel: Session-Recordings für den gewählten Server.
+  [Tab]   = zwischen Serverliste, Replays und Suchfeld wechseln
+  [Enter] auf Replay = Cast abspielen (Player startet, danach Serverbook zurück)
+  [←/Esc] im Replay-Panel = zurück zur Serverliste
 """
 from __future__ import annotations
 import curses
+import datetime
+import glob
+import os
 from ..config import Server, load, save, load_directory, save_directory
 from . import win_box as _win_box
 
 
 def run_serverbook() -> Server | None:
     """Serverbook öffnen. Gibt ausgewählten Server zurück oder None."""
-    def _w(stdscr):
-        return _main(stdscr)
-    return curses.wrapper(_w)
+    while True:
+        result = curses.wrapper(_main)
+        if result is None or isinstance(result, Server):
+            return result
+        # result ist ein Cast-Dateipfad → abspielen, dann Serverbook neu starten
+        from .cast_player import play_cast
+        play_cast(result)
 
 
 def _filter(servers: list[Server], q: str) -> list[Server]:
@@ -23,29 +35,59 @@ def _filter(servers: list[Server], q: str) -> list[Server]:
     return [s for s in servers if q in s.name.lower() or q in s.host.lower()]
 
 
+def _find_replays(server: Server) -> list[str]:
+    """Cast-Dateien für diesen Server im Session-Verzeichnis (neueste zuerst)."""
+    try:
+        from ..config import load_settings, effective_session_dir
+        sdir   = effective_session_dir(load_settings())
+        safe_h = server.host.replace(':', '_')
+        files  = glob.glob(str(sdir / f'{safe_h}_{server.port}_*.cast'))
+        files.sort(key=os.path.getmtime, reverse=True)
+        return files
+    except Exception:
+        return []
+
+
+def _cast_label(path: str, host: str, port: int) -> str:
+    """Cast-Dateiname → lesbares Datum/Zeit-Label (z.B. '29.06.26 14:30')."""
+    fname  = os.path.basename(path)
+    prefix = f'{host.replace(":", "_")}_{port}_'
+    if fname.startswith(prefix) and fname.endswith('.cast'):
+        try:
+            dt = datetime.datetime.strptime(fname[len(prefix):-5], '%Y-%m-%d_%H-%M-%S')
+            return dt.strftime('%d.%m.%y %H:%M')
+        except ValueError:
+            pass
+    return fname
+
+
 # ── Hauptloop ─────────────────────────────────────────────────────────────────
 
-def _main(stdscr) -> Server | None:
+def _main(stdscr) -> Server | str | None:
+    """Gibt Server, Cast-Dateipfad (str) oder None zurück."""
     from . import colors as C
     C.init()
     curses.curs_set(0)
 
     servers     = load()
-    dir_servers = load_directory()   # gecachtes Verzeichnis
-    dir_status  = f'{len(dir_servers)} Eintr\xe4ge' if dir_servers else 'Nicht geladen – [F5]'
+    dir_servers = load_directory()
+    dir_status  = f'{len(dir_servers)} Einträge' if dir_servers else 'Nicht geladen – [F5]'
 
-    cursor   = 0
-    scroll   = 0
-    q        = ''          # Filter-/Sucheingabe
-    dc_port  = '23'
-    focus    = 'list'      # 'list' | 'q'
-    view     = 'book'      # 'book' | 'dir'
+    cursor     = 0
+    scroll     = 0
+    q          = ''
+    panel      = 'list'    # 'list' | 'replays' | 'q'
+    view       = 'book'    # 'book' | 'dir'
+    rep_cursor = 0
+    rep_scroll = 0
+    _prev_sel  = object()  # Sentinel – noch kein Server selektiert
 
     while True:
         active   = servers if view == 'book' else dir_servers
         filtered = _filter(active, q)
         H, W     = stdscr.getmaxyx()
         list_h   = max(3, H - 16)
+        show_rep = W >= 70              # Replay-Panel erst ab 70 Spalten
 
         cursor = max(0, min(cursor, len(filtered) - 1)) if filtered else 0
         if cursor < scroll:
@@ -53,10 +95,28 @@ def _main(stdscr) -> Server | None:
         elif cursor >= scroll + list_h:
             scroll = cursor - list_h + 1
 
-        _draw(stdscr, H, W, filtered, cursor, scroll, list_h,
-              q, dc_port, focus, view, dir_status)
+        # Replays für aktuell selektierten Server ermitteln
+        sel = filtered[cursor] if filtered and cursor < len(filtered) else None
+        if sel is not _prev_sel:
+            rep_cursor = 0
+            rep_scroll = 0
+            _prev_sel  = sel
+        replays = _find_replays(sel) if sel and show_rep else []
 
-        curses.curs_set(0 if focus == 'list' else 1)
+        rep_cursor = max(0, min(rep_cursor, len(replays) - 1)) if replays else 0
+        if rep_cursor < rep_scroll:
+            rep_scroll = rep_cursor
+        elif rep_cursor >= rep_scroll + list_h:
+            rep_scroll = rep_cursor - list_h + 1
+
+        if panel == 'replays' and not show_rep:
+            panel = 'list'
+
+        _draw(stdscr, H, W, filtered, cursor, scroll, list_h,
+              q, panel, view, dir_status,
+              replays, rep_cursor, rep_scroll, sel, show_rep)
+
+        curses.curs_set(0 if panel in ('list', 'replays') else 1)
         key = stdscr.getch()
 
         # ── Einstellungen (F3) ────────────────────────────────────────────
@@ -65,120 +125,99 @@ def _main(stdscr) -> Server | None:
             open_settings(stdscr)
             continue
 
-        # ── Tab wechseln ───────────────────────────────────────────────────
+        # ── View wechseln (F4) ─────────────────────────────────────────────
         if key == curses.KEY_F4:
-            view   = 'dir' if view == 'book' else 'book'
-            cursor = 0
-            scroll = 0
-            q      = ''
-            focus  = 'list'
+            view = 'dir' if view == 'book' else 'book'
+            cursor = 0; scroll = 0; q = ''; panel = 'list'
             continue
 
         # ── Verzeichnis aktualisieren (F5) ─────────────────────────────────
         if key == curses.KEY_F5:
             _draw_fetch_status(stdscr, H, W, 'Verbinde mit telnetbbsguide.com …')
-            status_msg = ''
             try:
                 from ..directory import fetch
-                new_dir = fetch(on_status=lambda m: _draw_fetch_status(stdscr, H, W, m))
+                new_dir     = fetch(on_status=lambda m: _draw_fetch_status(stdscr, H, W, m))
                 save_directory(new_dir)
                 dir_servers = new_dir
-                dir_status  = f'{len(dir_servers)} Eintr\xe4ge – aktuell'
+                dir_status  = f'{len(dir_servers)} Einträge – aktuell'
                 if view == 'dir':
-                    cursor = 0
-                    scroll = 0
+                    cursor = 0; scroll = 0
             except Exception as e:
                 dir_status = f'Fehler: {str(e)[:60]}'
             continue
 
         # ── Serverliste ────────────────────────────────────────────────────
-        if focus == 'list':
-            if key == curses.KEY_UP:
-                if cursor > 0:
-                    cursor -= 1
-
-            elif key == curses.KEY_DOWN:
-                if filtered and cursor < len(filtered) - 1:
-                    cursor += 1
-
+        if panel == 'list':
+            if key == curses.KEY_UP and cursor > 0:
+                cursor -= 1
+            elif key == curses.KEY_DOWN and filtered and cursor < len(filtered) - 1:
+                cursor += 1
             elif key == curses.KEY_PPAGE:
                 cursor = max(0, cursor - list_h)
-
             elif key == curses.KEY_NPAGE:
                 cursor = min(len(filtered) - 1, cursor + list_h) if filtered else 0
-
             elif key in (curses.KEY_ENTER, 10, 13):
                 if filtered and cursor < len(filtered):
                     return filtered[cursor]
-
-            elif key == curses.KEY_IC:               # Einfg
+            elif key == curses.KEY_IC:
                 if view == 'book':
                     s = _edit_dialog(stdscr, None)
                     if s:
-                        servers.append(s)
-                        save(servers)
+                        servers.append(s); save(servers)
                         cursor = max(0, len(_filter(servers, q)) - 1)
                 elif view == 'dir' and filtered and cursor < len(filtered):
-                    # Verzeichnis-Eintrag ins Serverbook übernehmen
                     entry = filtered[cursor]
                     if entry not in servers:
-                        servers.append(entry)
-                        save(servers)
-
+                        servers.append(entry); save(servers)
             elif key == curses.KEY_F2 and view == 'book':
                 if filtered and cursor < len(filtered):
                     orig = filtered[cursor]
                     s = _edit_dialog(stdscr, orig)
                     if s:
-                        idx = servers.index(orig)
-                        servers[idx] = s
-                        save(servers)
-
+                        servers[servers.index(orig)] = s; save(servers)
             elif key == curses.KEY_DC and view == 'book':
                 if filtered and cursor < len(filtered):
-                    orig = filtered[cursor]
-                    idx  = servers.index(orig)
-                    servers.pop(idx)
-                    save(servers)
+                    servers.pop(servers.index(filtered[cursor])); save(servers)
                     cursor = max(0, min(cursor, len(_filter(servers, q)) - 1))
-
-            elif key == 9:                           # Tab → Sucheingabe
-                focus = 'q'
-
+            elif key == 9:                      # Tab → Replays oder Suche
+                panel = 'replays' if show_rep else 'q'
             elif key == 27:
                 return None
-
             elif 32 <= key < 127:
-                q      = chr(key)
-                cursor = 0
-                focus  = 'q'
+                q = chr(key); cursor = 0; panel = 'q'
+
+        # ── Replay-Panel ───────────────────────────────────────────────────
+        elif panel == 'replays':
+            if key == curses.KEY_UP and rep_cursor > 0:
+                rep_cursor -= 1
+            elif key == curses.KEY_DOWN and replays and rep_cursor < len(replays) - 1:
+                rep_cursor += 1
+            elif key in (curses.KEY_ENTER, 10, 13):
+                if replays and rep_cursor < len(replays):
+                    return replays[rep_cursor]  # Dateipfad → run_serverbook spielt ab
+            elif key == 9:                      # Tab → Suche
+                panel = 'q'
+            elif key in (27, curses.KEY_LEFT):
+                panel = 'list'
 
         # ── Sucheingabe ────────────────────────────────────────────────────
         else:
             if key == 9:
-                focus = 'list'
-
+                panel = 'list'
             elif key in (curses.KEY_UP, curses.KEY_DOWN):
-                focus = 'list'
-
+                panel = 'list'
             elif key == 27:
                 if q:
-                    q      = ''
-                    cursor = 0
+                    q = ''; cursor = 0
                 else:
-                    focus = 'list'
-
+                    panel = 'list'
             elif key in (curses.KEY_ENTER, 10, 13):
                 if filtered and cursor < len(filtered):
                     return filtered[cursor]
-
             elif key in (curses.KEY_BACKSPACE, 127, 8):
-                q = q[:-1]
-                cursor = 0
-
+                q = q[:-1]; cursor = 0
             elif 32 <= key < 127:
-                q += chr(key)
-                cursor = 0
+                q += chr(key); cursor = 0
 
     return None
 
@@ -187,40 +226,40 @@ def _main(stdscr) -> Server | None:
 
 def _draw(stdscr, H: int, W: int, servers: list[Server],
           cursor: int, scroll: int, list_h: int,
-          q: str, dc_port: str, focus: str, view: str, dir_status: str) -> None:
+          q: str, panel: str, view: str, dir_status: str,
+          replays: list[str], rep_cursor: int, rep_scroll: int,
+          sel_server: Server | None, show_rep: bool) -> None:
     from . import colors as C
     try:
         stdscr.erase()
 
-        # ── Kopfzeile mit Tab-Auswahl ──────────────────────────────────────
-        tab_book = ' Serverbook '
-        tab_dir  = ' Verzeichnis '
-        tab_hint = '[F3]=Einstellungen  [F4]=Wechseln  [F5]=Aktualisieren  [Esc]=Ende '
-
+        # ── Kopfzeile ─────────────────────────────────────────────────────
         stdscr.attron(C.p(C.TITLE) | curses.A_BOLD)
-        stdscr.addstr(0, 0, ' ansitelnet '.ljust(W)[: W])
+        stdscr.addstr(0, 0, ' ansitelnet '.ljust(W)[:W])
         stdscr.attroff(C.p(C.TITLE) | curses.A_BOLD)
 
         # Tabs in Zeile 1
+        tab_book = ' Serverbook '
+        tab_dir  = ' Verzeichnis '
+        tab_hint = '[F3]=Einstellungen  [F4]=Wechseln  [F5]=Aktualisieren  [Esc]=Ende '
         col = 1
         for label, is_active in ((tab_book, view == 'book'), (tab_dir, view == 'dir')):
             attr = (C.p(C.SELECT) | curses.A_BOLD) if is_active else C.p(C.DIM)
             try:
                 stdscr.attron(attr)
-                stdscr.addstr(1, col, label[: W - col - 1])
+                stdscr.addstr(1, col, label[:W - col - 1])
                 stdscr.attroff(attr)
             except curses.error:
                 pass
             col += len(label) + 1
-
         try:
             stdscr.attron(C.p(C.KEY))
-            stdscr.addstr(1, max(col, W - len(tab_hint) - 1), tab_hint[: W - 2])
+            stdscr.addstr(1, max(col, W - len(tab_hint) - 1), tab_hint[:W - 2])
             stdscr.attroff(C.p(C.KEY))
         except curses.error:
             pass
 
-        # ── Trennlinie ─────────────────────────────────────────────────────
+        # Trennlinie
         stdscr.attron(C.p(C.BORDER))
         try:
             stdscr.addstr(2, 0, '─' * (W - 1))
@@ -228,32 +267,39 @@ def _draw(stdscr, H: int, W: int, servers: list[Server],
             pass
         stdscr.attroff(C.p(C.BORDER))
 
-        # ── Sektion-Header ──────────────────────────────────────────────────
-        if view == 'book':
-            section = f'Serverbook ({len(servers)} Eintr\xe4ge)'
-        else:
-            section = f'Verzeichnis – {dir_status}'
+        # Sektion-Header
+        section = (f'Serverbook ({len(servers)} Einträge)'
+                   if view == 'book' else f'Verzeichnis – {dir_status}')
         if q:
             section += f'  [Suche: {q}]'
-
         stdscr.attron(C.p(C.INFO) | curses.A_BOLD)
         try:
-            stdscr.addstr(3, 1, section[: W - 2])
+            stdscr.addstr(3, 1, section[:W - 2])
         except curses.error:
             pass
         stdscr.attroff(C.p(C.INFO) | curses.A_BOLD)
 
-        # ── Serverliste ─────────────────────────────────────────────────────
-        lx = 1
+        # ── Spaltenaufteilung ──────────────────────────────────────────────
         ly = 4
-        lw = W - 2
         lh = list_h + 2
 
+        if show_rep:
+            split = W * 3 // 5      # Spalte der Trennlinie
+            lw    = split - 1       # nutzbare Breite linker Bereich
+            rw    = W - split - 2   # nutzbare Breite rechter Bereich
+            rx    = split + 1       # linke Spalte rechter Inhalt
+        else:
+            split = None
+            lw    = W - 3
+
+        # Rahmen zeichnen (mit optionaler Trennlinie)
         stdscr.attron(C.p(C.BORDER))
-        _box(stdscr, ly, lx, lh, lw)
+        _main_box(stdscr, ly, W, lh, split)
         stdscr.attroff(C.p(C.BORDER))
 
-        name_w = max(10, lw - 28)
+        # ── Serverliste (linkes Panel) ─────────────────────────────────────
+        name_w  = max(8, lw - 22)
+        list_focused = panel == 'list'
         for slot in range(list_h):
             abs_i = scroll + slot
             row   = ly + 1 + slot
@@ -261,15 +307,13 @@ def _draw(stdscr, H: int, W: int, servers: list[Server],
                 break
             srv    = servers[abs_i]
             is_cur = (abs_i == cursor)
-            conn   = f'{srv.host}:{srv.port}'
-            line   = f' {srv.name:<{name_w}} {conn:>{lw - name_w - 5}}'
-
-            if is_cur and focus == 'list':
+            line   = f' {srv.name:<{name_w}}  {srv.host}:{srv.port}'
+            if is_cur and list_focused:
                 stdscr.attron(C.p(C.SELECT) | curses.A_BOLD)
             elif is_cur:
                 stdscr.attron(C.p(C.SELECT))
             try:
-                stdscr.addstr(row, lx + 1, line[: lw - 2])
+                stdscr.addstr(row, 1, line[:lw])
             except curses.error:
                 pass
             if is_cur:
@@ -278,31 +322,79 @@ def _draw(stdscr, H: int, W: int, servers: list[Server],
         if not servers:
             stdscr.attron(C.p(C.DIM))
             if q:
-                msg = f'Keine Treffer f\xfcr "{q}"'
+                msg = f'Keine Treffer für "{q}"'
             elif view == 'book':
-                msg = 'Keine Server – [Ins] f\xfcr neuen Eintrag'
+                msg = 'Keine Server – [Ins] für neuen Eintrag'
             else:
                 msg = 'Verzeichnis leer – [F5] zum Laden'
             try:
-                stdscr.addstr(ly + 1, lx + 2, msg[: lw - 4])
+                stdscr.addstr(ly + 1, 2, msg[:lw - 2])
             except curses.error:
                 pass
             stdscr.attroff(C.p(C.DIM))
 
+        # ── Replay-Panel (rechtes Panel) ──────────────────────────────────
+        if show_rep:
+            rep_focused = panel == 'replays'
+
+            # Mini-Header in der ersten Zeile des rechten Panels
+            n_str  = f'{len(replays)}' if replays else '–'
+            host_s = f' {sel_server.host}' if sel_server else ''
+            hdr    = f' ▶ {n_str} Aufnahme(n){host_s}'
+            stdscr.attron(C.p(C.INFO) | curses.A_BOLD)
+            try:
+                stdscr.addstr(ly + 1, rx, hdr[:rw])
+            except curses.error:
+                pass
+            stdscr.attroff(C.p(C.INFO) | curses.A_BOLD)
+
+            # Replay-Einträge (ab Zeile ly+2, Header belegt ly+1)
+            rep_h = list_h - 1
+            for slot in range(rep_h):
+                abs_i = rep_scroll + slot
+                row   = ly + 2 + slot
+                if row >= ly + lh - 1 or abs_i >= len(replays):
+                    break
+                label  = _cast_label(replays[abs_i],
+                                     sel_server.host if sel_server else '',
+                                     sel_server.port if sel_server else 0)
+                is_cur = (abs_i == rep_cursor)
+                line   = f' {label}'
+                if is_cur and rep_focused:
+                    stdscr.attron(C.p(C.SELECT) | curses.A_BOLD)
+                elif is_cur:
+                    stdscr.attron(C.p(C.SELECT))
+                try:
+                    stdscr.addstr(row, rx, line[:rw])
+                except curses.error:
+                    pass
+                if is_cur:
+                    stdscr.attroff(C.p(C.SELECT) | curses.A_BOLD)
+
+            if not replays and sel_server:
+                stdscr.attron(C.p(C.DIM))
+                try:
+                    stdscr.addstr(ly + 2, rx, ' Keine Aufnahmen'[:rw])
+                except curses.error:
+                    pass
+                stdscr.attroff(C.p(C.DIM))
+
         # ── Aktions-Hinweise ────────────────────────────────────────────────
         hint_row = ly + lh
         stdscr.attron(C.p(C.KEY))
-        if view == 'book':
-            hints = '[Ins]=Neu  [F2]=Edit  [Entf]=L\xf6schen  [Enter]=Verbinden  [Tab]=Suche'
+        if panel == 'replays':
+            hints = '[↑↓]=Auswahl  [Enter]=Abspielen  [←/Esc]=zurück  [Tab]=Suche'
+        elif view == 'book':
+            hints = '[Ins]=Neu  [F2]=Edit  [Entf]=Löschen  [Enter]=Verbinden  [Tab]=Replays'
         else:
-            hints = '[Ins]=→Serverbook  [Enter]=Verbinden  [Tab]=Suche  [F5]=Aktualisieren'
+            hints = '[Ins]=→Serverbook  [Enter]=Verbinden  [Tab]=Replays  [F5]=Aktualisieren'
         try:
-            stdscr.addstr(hint_row, 1, hints[: W - 2])
+            stdscr.addstr(hint_row, 1, hints[:W - 2])
         except curses.error:
             pass
         stdscr.attroff(C.p(C.KEY))
 
-        # ── Trennlinie ─────────────────────────────────────────────────────
+        # Trennlinie
         sep_row = hint_row + 1
         stdscr.attron(C.p(C.BORDER))
         try:
@@ -326,17 +418,17 @@ def _draw(stdscr, H: int, W: int, servers: list[Server],
             stdscr.addstr(sq_row, 2, host_lbl)
         except curses.error:
             pass
-        field_w  = min(40, W - 22)
-        q_attr = C.p(C.INPUT) | curses.A_BOLD if focus == 'q' else C.p(C.INPUT)
+        field_w = min(40, W - 22)
+        q_attr  = C.p(C.INPUT) | curses.A_BOLD if panel == 'q' else C.p(C.INPUT)
         stdscr.attron(q_attr)
         try:
             stdscr.addstr(sq_row, 2 + len(host_lbl),
-                          (q + ' ').ljust(field_w)[: field_w])
+                          (q + ' ').ljust(field_w)[:field_w])
         except curses.error:
             pass
         stdscr.attroff(q_attr)
 
-        if focus == 'q':
+        if panel == 'q':
             curpos_x = 2 + len(host_lbl) + min(len(q), field_w - 1)
             try:
                 stdscr.move(sq_row, min(curpos_x, W - 1))
@@ -347,7 +439,7 @@ def _draw(stdscr, H: int, W: int, servers: list[Server],
         stdscr.attron(C.p(C.KEY))
         try:
             stdscr.addstr(sq_row, 2,
-                          '[↑↓]=Liste  [Tab]=Weiter  [Enter]=Verbinden  [Esc]=L\xf6schen/Liste'[: W - 4])
+                          '[↑↓]=Liste  [Tab]=Weiter  [Enter]=Verbinden  [Esc]=Löschen/Liste'[:W - 4])
         except curses.error:
             pass
         stdscr.attroff(C.p(C.KEY))
@@ -357,6 +449,28 @@ def _draw(stdscr, H: int, W: int, servers: list[Server],
         pass
 
     curses.doupdate()
+
+
+def _main_box(stdscr, ly: int, W: int, lh: int, split: int | None) -> None:
+    """Hauptbox; bei split≠None mit vertikaler Trennlinie bei Spalte split."""
+    try:
+        if split is None:
+            stdscr.addstr(ly,          0, '┌' + '─' * (W - 2) + '┐')
+            stdscr.addstr(ly + lh - 1, 0, '└' + '─' * (W - 2) + '┘')
+            for i in range(1, lh - 1):
+                stdscr.addstr(ly + i, 0,     '│')
+                stdscr.addstr(ly + i, W - 1, '│')
+        else:
+            lw = split - 1
+            rw = W - split - 2
+            stdscr.addstr(ly,          0, '┌' + '─' * lw + '┬' + '─' * rw + '┐')
+            stdscr.addstr(ly + lh - 1, 0, '└' + '─' * lw + '┴' + '─' * rw + '┘')
+            for i in range(1, lh - 1):
+                stdscr.addstr(ly + i, 0,       '│')
+                stdscr.addstr(ly + i, split,   '│')
+                stdscr.addstr(ly + i, W - 1,   '│')
+    except curses.error:
+        pass
 
 
 def _draw_fetch_status(stdscr, H: int, W: int, msg: str) -> None:
@@ -373,24 +487,13 @@ def _draw_fetch_status(stdscr, H: int, W: int, msg: str) -> None:
         win.attroff(C.p(C.BORDER))
         t = '  Verzeichnis laden  '
         win.attron(C.p(C.TITLE) | curses.A_BOLD)
-        win.addstr(0, max(1, (dw - len(t)) // 2), t[: dw - 2])
+        win.addstr(0, max(1, (dw - len(t)) // 2), t[:dw - 2])
         win.attroff(C.p(C.TITLE) | curses.A_BOLD)
-        win.addstr(2, 2, msg[: dw - 4])
+        win.addstr(2, 2, msg[:dw - 4])
         win.noutrefresh()
     except curses.error:
         pass
     curses.doupdate()
-
-
-def _box(win, y: int, x: int, h: int, w: int) -> None:
-    try:
-        win.addstr(y,         x,     '┌' + '─' * (w - 2) + '┐')
-        win.addstr(y + h - 1, x,     '└' + '─' * (w - 2) + '┘')
-        for i in range(1, h - 1):
-            win.addstr(y + i, x,         '│')
-            win.addstr(y + i, x + w - 1, '│')
-    except curses.error:
-        pass
 
 
 # ── Server bearbeiten / anlegen ───────────────────────────────────────────────
@@ -434,7 +537,7 @@ def _edit_dialog(stdscr, srv: Server | None) -> Server | None:
 
             t = '  Server bearbeiten  ' if srv else '  Neuer Server  '
             win.attron(C.p(C.TITLE) | curses.A_BOLD)
-            win.addstr(0, max(1, (dw - len(t)) // 2), t[: dw - 2])
+            win.addstr(0, max(1, (dw - len(t)) // 2), t[:dw - 2])
             win.attroff(C.p(C.TITLE) | curses.A_BOLD)
 
             fw = dw - len(labels['download_dir']) - 6
@@ -446,17 +549,15 @@ def _edit_dialog(stdscr, srv: Server | None) -> Server | None:
                 attr = C.p(C.INPUT) | curses.A_BOLD if is_f else C.p(C.INPUT)
                 win.addstr(row, 2, lbl)
                 win.attron(attr)
-                win.addstr(row, 2 + len(lbl), (val + ' ').ljust(fw)[: fw])
+                win.addstr(row, 2 + len(lbl), (val + ' ').ljust(fw)[:fw])
                 win.attroff(attr)
 
-            note = '(Ordner leer = globale Einstellung)'
             win.attron(C.p(C.DIM))
-            win.addstr(dh - 4, 2, note[: dw - 4])
+            win.addstr(dh - 4, 2, '(Ordner leer = globale Einstellung)'[:dw - 4])
             win.attroff(C.p(C.DIM))
 
-            hints = '[Tab]=Weiter  [Enter]=OK  [Esc]=Abbr.'
             win.attron(C.p(C.KEY))
-            win.addstr(dh - 2, 2, hints[: dw - 4])
+            win.addstr(dh - 2, 2, '[Tab]=Weiter  [Enter]=OK  [Esc]=Abbr.'[:dw - 4])
             win.attroff(C.p(C.KEY))
 
             fname   = order[focus]
@@ -475,10 +576,8 @@ def _edit_dialog(stdscr, srv: Server | None) -> Server | None:
 
         if key in (9, curses.KEY_DOWN):
             focus = (focus + 1) % len(order)
-
         elif key in (curses.KEY_BTAB, curses.KEY_UP):
             focus = (focus - 1) % len(order)
-
         elif key in (curses.KEY_ENTER, 10, 13):
             if focus < len(order) - 1:
                 focus = (focus + 1) % len(order)
@@ -495,14 +594,11 @@ def _edit_dialog(stdscr, srv: Server | None) -> Server | None:
                     )
                 except ValueError:
                     pass
-
         elif key == 27:
             curses.curs_set(0)
             return None
-
         elif key in (curses.KEY_BACKSPACE, 127, 8):
             fields[order[focus]] = fields[order[focus]][:-1]
-
         elif 32 <= key < 127:
             fname = order[focus]
             ch    = chr(key)
