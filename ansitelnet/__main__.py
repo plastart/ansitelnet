@@ -28,7 +28,14 @@ def main() -> None:
     parser.add_argument('-r', '--record', dest='record', action='store_true',
                         default=False,
                         help='Session von Anfang an als asciinema-Cast aufzeichnen')
+    parser.add_argument('--play', dest='play_cast', metavar='FILE',
+                        help='Cast-Datei interaktiv abspielen und bearbeiten')
     args = parser.parse_args()
+
+    if args.play_cast:
+        from .ui.cast_player import play_cast
+        play_cast(args.play_cast)
+        return
 
     if args.host:
         # Direktverbindung ohne UI
