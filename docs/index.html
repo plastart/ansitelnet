@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ansitelnet — BBS Terminal für Linux</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/asciinema-player@3.8.0/dist/bundle/asciinema-player.css">
+  <style>
+    :root {
+      --bg:       #0d0d0d;
+      --bg2:      #141414;
+      --bg3:      #1a1a1a;
+      --border:   #2a2a2a;
+      --green:    #39ff14;
+      --amber:    #ffb300;
+      --cyan:     #00e5ff;
+      --dim:      #555;
+      --text:     #ccc;
+      --text2:    #888;
+      --font:     "Cascadia Code", "Fira Code", "JetBrains Mono", "Courier New", monospace;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    a { color: var(--cyan); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── scanline overlay ──────────────────────────────────────────────── */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        to bottom,
+        transparent 0px,
+        transparent 3px,
+        rgba(0,0,0,.08) 3px,
+        rgba(0,0,0,.08) 4px
+      );
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* ── layout ────────────────────────────────────────────────────────── */
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    /* ── header ────────────────────────────────────────────────────────── */
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 2.5rem 0 2rem;
+    }
+
+    .hero-title {
+      font-size: 3.2rem;
+      letter-spacing: .08em;
+      color: var(--green);
+      text-shadow: 0 0 18px rgba(57,255,20,.45);
+    }
+
+    .hero-title span { color: var(--amber); }
+
+    .hero-sub {
+      margin-top: .5rem;
+      color: var(--text2);
+      font-size: .95rem;
+      max-width: 620px;
+    }
+
+    .badges {
+      margin-top: 1.2rem;
+      display: flex;
+      gap: .6rem;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: .25em .75em;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      font-size: .8rem;
+      color: var(--text2);
+    }
+
+    .badge-green  { border-color: var(--green);  color: var(--green);  }
+    .badge-amber  { border-color: var(--amber);  color: var(--amber);  }
+    .badge-cyan   { border-color: var(--cyan);   color: var(--cyan);   }
+
+    .header-cta {
+      margin-top: 1.6rem;
+      display: flex;
+      gap: .8rem;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      padding: .5em 1.4em;
+      border: 1px solid var(--green);
+      color: var(--green);
+      border-radius: 3px;
+      font-family: var(--font);
+      font-size: .9rem;
+      cursor: pointer;
+      background: transparent;
+      transition: background .15s, color .15s;
+    }
+
+    .btn:hover {
+      background: var(--green);
+      color: #000;
+      text-decoration: none;
+    }
+
+    .btn-secondary {
+      border-color: var(--dim);
+      color: var(--text2);
+    }
+
+    .btn-secondary:hover {
+      background: var(--dim);
+      color: var(--text);
+    }
+
+    /* ── sections ──────────────────────────────────────────────────────── */
+    section {
+      padding: 3rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    h2 {
+      font-size: 1.3rem;
+      color: var(--amber);
+      margin-bottom: 1.4rem;
+      letter-spacing: .06em;
+    }
+
+    h2::before { content: "# "; color: var(--dim); }
+
+    h3 {
+      font-size: 1rem;
+      color: var(--cyan);
+      margin: 1.6rem 0 .6rem;
+    }
+
+    p { margin-bottom: .9rem; color: var(--text); }
+
+    /* ── install box ───────────────────────────────────────────────────── */
+    .install-box {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--green);
+      border-radius: 4px;
+      padding: 1rem 1.2rem;
+      margin-bottom: 1rem;
+    }
+
+    .install-box pre {
+      font-size: .88rem;
+      color: var(--green);
+      overflow-x: auto;
+    }
+
+    .install-box .comment { color: var(--dim); }
+
+    /* ── feature grid ──────────────────────────────────────────────────── */
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 1rem;
+      margin-top: .5rem;
+    }
+
+    .feature-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1rem;
+    }
+
+    .feature-card .icon {
+      font-size: 1.4rem;
+      margin-bottom: .4rem;
+    }
+
+    .feature-card strong {
+      display: block;
+      color: var(--cyan);
+      margin-bottom: .3rem;
+      font-size: .9rem;
+    }
+
+    .feature-card p {
+      font-size: .82rem;
+      color: var(--text2);
+      margin: 0;
+    }
+
+    /* ── demo blocks ───────────────────────────────────────────────────── */
+    .demo-block {
+      margin-bottom: 2.5rem;
+    }
+
+    .demo-label {
+      display: flex;
+      align-items: baseline;
+      gap: .7rem;
+      margin-bottom: .6rem;
+    }
+
+    .demo-label h3 { margin: 0; }
+
+    .demo-label .cmd {
+      font-size: .8rem;
+      color: var(--dim);
+      background: var(--bg3);
+      padding: .15em .6em;
+      border-radius: 3px;
+    }
+
+    .demo-placeholder {
+      background: var(--bg2);
+      border: 1px dashed var(--border);
+      border-radius: 4px;
+      padding: 2.5rem 1rem;
+      text-align: center;
+      color: var(--dim);
+      font-size: .85rem;
+    }
+
+    .demo-placeholder code {
+      display: block;
+      margin-top: .5rem;
+      color: var(--amber);
+      font-size: .8rem;
+    }
+
+    /* ── keybindings table ─────────────────────────────────────────────── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .88rem;
+      margin-bottom: 1rem;
+    }
+
+    th {
+      text-align: left;
+      color: var(--amber);
+      border-bottom: 1px solid var(--border);
+      padding: .4em .8em .4em 0;
+      font-weight: normal;
+    }
+
+    td {
+      padding: .35em .8em .35em 0;
+      border-bottom: 1px solid #1e1e1e;
+      color: var(--text2);
+    }
+
+    td:first-child, th:first-child {
+      color: var(--cyan);
+      white-space: nowrap;
+      padding-right: 1.5rem;
+    }
+
+    /* ── footer ────────────────────────────────────────────────────────── */
+    footer {
+      padding: 2rem 0;
+      color: var(--dim);
+      font-size: .8rem;
+      text-align: center;
+    }
+
+    footer a { color: var(--dim); }
+    footer a:hover { color: var(--text2); }
+
+    /* ── responsive ────────────────────────────────────────────────────── */
+    @media (max-width: 600px) {
+      .hero-title { font-size: 2.2rem; }
+      .feature-grid { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="container">
+    <div class="hero-title">ansi<span>telnet</span></div>
+    <p class="hero-sub">
+      Retro-faithful BBS terminal connector for Linux — single self-contained binary, no install required.
+      Full 16-colour ANSI art, ZModem file transfer, built-in server book and live BBS directory.
+    </p>
+    <div class="badges">
+      <span class="badge badge-green">Linux</span>
+      <span class="badge badge-amber">Python → single binary</span>
+      <span class="badge badge-cyan">Telnet · ZModem · CP437</span>
+      <span class="badge">MIT licence</span>
+    </div>
+    <div class="header-cta">
+      <a class="btn" href="https://github.com/plastart/ansitelnet/releases/latest">Download Binary</a>
+      <a class="btn btn-secondary" href="https://github.com/plastart/ansitelnet">GitHub</a>
+      <a class="btn btn-secondary" href="#demos">Demos</a>
+      <a class="btn btn-secondary" href="#usage">Docs</a>
+    </div>
+  </div>
+</header>
+
+<!-- ── Quick Install ─────────────────────────────────────────────────────── -->
+<section id="install">
+  <div class="container">
+    <h2>Install</h2>
+
+    <div class="install-box">
+      <pre><span class="comment"># download, make executable, add to PATH</span>
+curl -L https://github.com/plastart/ansitelnet/releases/latest/download/ansitelnet-linux-x86_64 \
+     -o ~/.local/bin/ansitelnet
+chmod +x ~/.local/bin/ansitelnet</pre>
+    </div>
+
+    <p style="color:var(--text2);font-size:.85rem">
+      For ZModem file transfers you also need <code style="color:var(--cyan)">lrzsz</code>:
+      <code style="color:var(--amber)">sudo apt install lrzsz</code>
+    </p>
+  </div>
+</section>
+
+<!-- ── Features ──────────────────────────────────────────────────────────── -->
+<section id="features">
+  <div class="container">
+    <h2>Features</h2>
+    <div class="feature-grid">
+
+      <div class="feature-card">
+        <div class="icon">&#9641;</div>
+        <strong>ANSI &amp; CP437</strong>
+        <p>Block/box-drawing characters and 16-colour IBM palette via OSC 4 — art renders exactly as on the original hardware.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="icon">&#9650;</div>
+        <strong>ZModem Transfer</strong>
+        <p>Auto-detected downloads, F12 upload picker, batch transfers, binary Telnet mode — powered by lrzsz.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="icon">&#9776;</div>
+        <strong>Server Book</strong>
+        <p>Persistent local list of BBSs with name, host, port and colour mode. Add, edit, delete with keyboard shortcuts.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="icon">&#9830;</div>
+        <strong>BBS Directory</strong>
+        <p>Live download from telnetbbsguide.com — browse hundreds of active boards, filter by name, connect or save with one key.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="icon">&#9646;</div>
+        <strong>Width Cap</strong>
+        <p><code>-w 80</code> centres the BBS in 80 columns with │ borders on wide terminals. NAWS-aware.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="icon">&#9654;</div>
+        <strong>Session Recording</strong>
+        <p>Record sessions as asciinema casts (<code>-r file.cast</code>) and replay or edit them with the built-in player (<code>--play</code>).</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ── Demos ─────────────────────────────────────────────────────────────── -->
+<section id="demos">
+  <div class="container">
+    <h2>Demos</h2>
+
+    <!-- Server Book -->
+    <div class="demo-block">
+      <div class="demo-label">
+        <h3>Server Book UI</h3>
+        <span class="cmd">ansitelnet</span>
+      </div>
+      <div id="player-serverbook"></div>
+    </div>
+
+    <!-- BBS Session -->
+    <div class="demo-block">
+      <div class="demo-label">
+        <h3>Live BBS Session</h3>
+        <span class="cmd">ansitelnet neon.b4bbs.com 23</span>
+      </div>
+      <div id="player-bbs-session"></div>
+    </div>
+
+    <!-- Width Cap -->
+    <div class="demo-block">
+      <div class="demo-label">
+        <h3>Width Cap</h3>
+        <span class="cmd">ansitelnet neon.b4bbs.com 23 -w 80</span>
+      </div>
+      <div id="player-width-cap"></div>
+    </div>
+
+    <!-- Cast Player -->
+    <div class="demo-block">
+      <div class="demo-label">
+        <h3>Built-in Cast Player</h3>
+        <span class="cmd">ansitelnet --play demo.cast</span>
+      </div>
+      <div id="player-cast-player"></div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ── Usage ─────────────────────────────────────────────────────────────── -->
+<section id="usage">
+  <div class="container">
+    <h2>Usage</h2>
+
+    <h3>Direct connection</h3>
+    <div class="install-box">
+      <pre>ansitelnet &lt;host&gt; [port]            <span class="comment"># Telnet, 16 colours</span>
+ansitelnet bbs.example.net 23
+ansitelnet bbs.example.net 23 -8    <span class="comment"># 8-colour mode</span>
+ansitelnet bbs.example.net 23 -n    <span class="comment"># netcat mode (no IAC)</span>
+ansitelnet bbs.example.net 23 -w 80 <span class="comment"># cap at 80 columns</span></pre>
+    </div>
+
+    <h3>Recording &amp; playback</h3>
+    <div class="install-box">
+      <pre>ansitelnet bbs.example.net 23 -r session.cast  <span class="comment"># record</span>
+ansitelnet --play session.cast                  <span class="comment"># replay / edit</span></pre>
+    </div>
+
+    <h3>Server Book keys</h3>
+    <table>
+      <tr><th>Key</th><th>Action</th></tr>
+      <tr><td>↑ / ↓</td><td>Navigate list</td></tr>
+      <tr><td>Enter</td><td>Connect to selected BBS</td></tr>
+      <tr><td>Ins</td><td>Add new server</td></tr>
+      <tr><td>F2</td><td>Edit selected server</td></tr>
+      <tr><td>Del</td><td>Delete selected server</td></tr>
+      <tr><td>F4</td><td>Switch to BBS Directory tab</td></tr>
+      <tr><td>F5</td><td>Download / refresh BBS directory</td></tr>
+      <tr><td>Tab</td><td>Jump to search/filter field</td></tr>
+      <tr><td>Esc</td><td>Quit</td></tr>
+    </table>
+
+    <h3>In-session keys</h3>
+    <table>
+      <tr><th>Key</th><th>Action</th></tr>
+      <tr><td>F12</td><td>Session menu (disconnect / upload file)</td></tr>
+    </table>
+
+    <h3>Cast Player keys</h3>
+    <table>
+      <tr><th>Key</th><th>Action</th></tr>
+      <tr><td>Space</td><td>Play / Pause</td></tr>
+      <tr><td>← →</td><td>±5 seconds</td></tr>
+      <tr><td>Shift+← →</td><td>Step one event</td></tr>
+      <tr><td>Home / End</td><td>Jump to start / end</td></tr>
+      <tr><td>N</td><td>Jump to next pause (gap ≥ 1 s)</td></tr>
+      <tr><td>[</td><td>Cut everything before current position</td></tr>
+      <tr><td>]</td><td>Cut everything after current position</td></tr>
+      <tr><td>M</td><td>Set / clear range marker</td></tr>
+      <tr><td>D</td><td>Delete marked range</td></tr>
+      <tr><td>S</td><td>Save (overwrites original)</td></tr>
+      <tr><td>Q / Esc</td><td>Quit</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- ── Background ────────────────────────────────────────────────────────── -->
+<section id="background">
+  <div class="container">
+    <h2>Background</h2>
+
+    <h3>What is a BBS?</h3>
+    <p>
+      A <strong style="color:var(--cyan)">Bulletin Board System</strong> (BBS) is a computer server that users dial (or telnet)
+      into to exchange messages, play door games, browse files, and transfer software.
+      BBSs flourished from the late 1970s through the 1990s and formed the backbone
+      of pre-internet online culture. Today's surviving systems run classics like
+      <strong>Mystic BBS</strong>, <strong>Synchronet</strong>, and <strong>Renegade</strong>.
+    </p>
+
+    <h3>ANSI art &amp; CP437</h3>
+    <p>
+      BBSs use <strong style="color:var(--cyan)">ANSI escape codes</strong> combined with
+      <strong style="color:var(--cyan)">IBM Code Page 437</strong> — the original PC character
+      set with block-drawing characters (░▒▓█), box-drawing lines (┌┐└┘│─), and symbols never
+      in ASCII. <code>ansitelnet</code> handles CP437→UTF-8 conversion transparently and sets
+      the 16-colour IBM palette via OSC 4.
+    </p>
+
+    <h3>ZModem</h3>
+    <p>
+      ZModem (1986, Chuck Forsberg) is the crash-recoverable file-transfer protocol that
+      replaced XModem/YModem on BBSs. <code>ansitelnet</code> detects the
+      <code>\x18B</code> trigger frame mid-stream and hands the socket to
+      <code>rz</code>/<code>sz</code>, showing a live progress dialog.
+    </p>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <p>
+      <a href="https://github.com/plastart/ansitelnet">github.com/plastart/ansitelnet</a>
+      &nbsp;·&nbsp; MIT licence
+      &nbsp;·&nbsp; Made with ♥ and a little help of Claude Sonnet
+    </p>
+  </div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/asciinema-player@3.8.0/dist/bundle/asciinema-player.min.js"></script>
+<script>
+  const PLAYER_OPTS = {
+    cols: 100,
+    rows: 28,
+    theme: "solarized-dark",
+    autoPlay: false,
+    loop: false,
+    fit: "width",
+    terminalFontFamily: "'Cascadia Code', 'Fira Code', 'Courier New', monospace",
+  };
+
+  const demos = [
+    { id: "player-serverbook",    src: "recordings/demo-serverbook.cast",   rows: 26 },
+    { id: "player-bbs-session",   src: "recordings/demo-bbs-session.cast",  rows: 30 },
+    { id: "player-width-cap",     src: "recordings/demo-width-cap.cast",    rows: 30 },
+    { id: "player-cast-player",   src: "recordings/demo-cast-player.cast",  rows: 30 },
+  ];
+
+  demos.forEach(({ id, src, rows }) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    // Show placeholder until the file is actually present
+    fetch(src, { method: "HEAD" })
+      .then(r => {
+        if (r.ok) {
+          AsciinemaPlayer.create(src, el, { ...PLAYER_OPTS, rows });
+        } else {
+          throw new Error("not found");
+        }
+      })
+      .catch(() => {
+        el.innerHTML =
+          `<div class="demo-placeholder">Recording noch nicht vorhanden
+           <code>asciinema rec docs/${src.replace("recordings/", "recordings/")}</code></div>`;
+      });
+  });
+</script>
+
+</body>
+</html>
